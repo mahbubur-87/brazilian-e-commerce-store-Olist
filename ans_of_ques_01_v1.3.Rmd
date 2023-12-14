@@ -1,0 +1,616 @@
+---
+title: "Brazilian e-commerce store: Olist"
+author: "Mahbubur Rahman"
+date: "7/17/2021"
+geometry: "left=2cm,right=1cm,top=1cm,bottom=2cm"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(data.table)
+library(ggplot2)
+library(waffle)
+library(GGally)
+library(patchwork)
+library(tidyverse)
+library(viridis)
+library(fmsb)
+library(grid)
+library(gridExtra)
+library(knitr)
+
+knitr::opts_knit$set(root.dir = paste("/home/mahbubur/mahbub-dev/beuth_hochschule_for_technik_berlin/data_science/",
+            "data_visualization/analysis/dataset/brazillian_ecommerce/refined_csv", 
+            sep = ""))
+```
+
+## Introduction
+
+We did the data analysis and data visualization on a large Brazilian e-commerce store named "Olist". We answer the following research questions:
+
+* Which are the explanatory variables or features that influence to calculate the top products of the e-commerce store?
+* Calculate and visualize the top products of the e-commerce store using the explanatory variables or features that are selected from the principle component analysis.
+
+## Dataset Overview:
+There are total 8 tables in the db schema. They are given below:
+
+1. olist_orders_dataset
+2. olist_order_items_dataset
+3. olist_products_dataset
+4. olist_order_customer_dataset
+5. olist_order_reviews_dataset
+6. olist_order_payments_dataset
+7. olist_sellers_dataset
+8. olist_geolocation_dataset
+
+For my data analysis, the customer, product, order, order item data set are used. But there are some problems in the db schema. So, as part of data pre processing, data cleaning and at the bottom line to maintain the data quality, We created a refined csv from those data set that is used for later for further data analysis. To make refined csv, We considered only the successful orders which are delivered and shipped.
+
+```{r bra_01, echo=TRUE}
+customer_order_product <- read.csv('customer_order_product.csv')
+# 2nd row from the refined csv
+refined_csv_2nd_row <- customer_order_product[2, ]
+row.names(refined_csv_2nd_row) <- "Refined CSV - 2nd Row"
+kable(t(refined_csv_2nd_row))
+```
+
+### For example: 
+The above data row (displayed in vertical order) from the refined csv can be interpreted in textual format as below:
+
+"Using the Olist e-commerce store, a customer Mr. '68f2b37558e27791155db34bcded5ac0' chooses a product '00088930e925c41fd95ebfe695fd2655' from product category 'automotivo' by seeing 4 product photos. Then this customer buys one piece of that product which order number is 'f5eda0ded77c1293b04c953138c8331d' from the seller '7142540dd4c91e2237acb7e911c4eba2' on month '12' and year '2017' at price '129.9'. The order arrives to the customer on month '12' and year '2017'. The shipment price is '13.93' which is billed by the courier service. The shipment price is calculated based on the product's dimensions (width '26 cm', height '10 cm', length '55 cm') and also the product's weight '1225 gm'."
+
+After the refinement, there are total 99,878 observations and each observation contains 21 explanatory variables or features. These explanatory variables are formed into two groups: numeric(12 variables) and factor(9 variables).
+
+## External Data Source:
+
+We created another csv that contains product names in english and for this We used external sources because in the existing data set the product name's length and category are present but there is no product name in the product data set. The external source link is given in the reference section. To collect data We used mainly product category and product name's length variables. We did that manually. The few rows from that csv are shown below:
+
+```{r bra_02, tidy = 'formatR', echo=FALSE}
+product_with_names <- read.csv("top_products_by_parameters.csv")
+# 2nd row from the another refined csv
+#refined_csv_2nd_row <- product_with_names[2, ]
+#row.names(refined_csv_2nd_row) <- "Artificial Product Names CSV - 2nd Row"
+kable(product_with_names[1:4, 2:4])
+```
+
+## Interested Persons in Data Visualization:
+
+As this is the data analysis and visualization on an e-commerce store named "Olist". So the intersted persons in the research questions and corresponding data visualization are as follows:
+
+* Olist board of directors:
+Because, they can easily see from which type of products, the e-commerce store is earning most and which type of products has more sales and revenue in the marketplace. Also, which product category has the maximum sales coverage on overall store.     
+
+* Existing and Future Sellers
+Because, the sellers can learn about the customer's interest on specific products and also on product categories in this marketplace so that they can take better decision on selling products.    
+
+## Data Visualization for Top Products:
+### Design Decision:
+After the data analysis, We prefer to use waffle chart and spider chart because they are both visually attractive and informative. Also, it is easier to read and detect pattern within the data. The specific advantages are given below:
+
+### Waffle chart's advantage over Pie chart:
+* The visual representation is more quantitative and countable than pie chart because, in a waffle chart, the counting of cells is easy instead of angle and area in the pie chart. Some cases, the angles in the pie chart are too small that they are very hard to interpret.
+* The space utilization is higher because waffle chart uses square to cover the whole area in the chart.
+
+### Spider chart's advantage over Bar chart:
+* To see the variation and figure out the common characteristics in data, it is better to use the spider chart rather than bar chart.
+* In the bar chart, it is very hard to detect key assumptions, causes, effects, or patterns but using the spider chart, it is easy to detect pattern in data.
+
+```{r bra_03, tidy = 'formatR', echo=FALSE}
+cop.dt <- data.table(customer_order_product, key='product_id')
+pwn.dt <- data.table(product_with_names, key='product_id')
+
+################ Graphical Functions with Data Pre Processing #######################
+## Function visualize_waffle_chart: 
+### Description:
+#This function helps to visualize waffle chart and this function draws two waffle chart one after another.  This function is basically used to display category wise sales and revenues.
+  
+### Arguments:
+#data_table        : data frame or data table object, from where the chart uses the values for                                  visualization.
+
+#num_items         : integer, the number of groups or items that is used counting and coloring square of waffle.
+
+#waffle_title      : string, the title to explain briefly about the chart.
+
+#waffle_rows       : integer, number of rows to draw a waffle squares. 
+
+#waffle_size       : integer, number of columns to draw a waffle squares.
+
+# Waffle chart
+visualize_waffle_chart <- function(data_table, num_items, 
+                                   waffle_title, waffle_rows, 
+                                   waffle_size) {
+  
+  # Color Palate
+  colors_for_waffle <- c("#44D2AC", "#E48B8B", "#B67093", "#3A9ABD", 
+                         "#CFE252", "#029534", "#e5b849", "#d0effe", 
+                         "#ff993c", "#ff3b7d", "#bcee68", "#ff7f50", 
+                         "#ff7f00", "#eed8ae")
+  
+  # Waffle chart to visualize sales
+  data_table <- data_table[order(-purchase_quantity)]
+  sales_by_group <- c(data_table$purchase_quantity[1:14])
+  names(sales_by_group) <- data_table$group_name[1:14]
+  
+  sales_waffle <- waffle(sales_by_group[1:num_items]/1000, rows=waffle_rows, 
+                         size=waffle_size, 
+                         colors=colors_for_waffle[1:num_items], 
+                         title=waffle_title[1],
+                         xlab="1 square = 1000 sales", 
+                         legend_pos = "left")
+  
+  # Waffle chart to visualize revenues
+  data_table <- data_table[order(-price)]
+  revenues_by_group <- c(data_table$price[1:14])
+  names(revenues_by_group) <- data_table$group_name[1:14]
+  
+  revenues_waffle <- waffle(revenues_by_group[1:num_items]/100000, rows=waffle_rows, 
+                            size=waffle_size, 
+                            colors=colors_for_waffle[1:num_items], 
+                            title=waffle_title[2],
+                            xlab="1 square = 100,000 brazillian real", 
+                            legend_pos = "right")
+  
+  sales_waffle / revenues_waffle
+}
+```
+
+```{r bra_04, tidy = 'formatR', echo=FALSE}
+## Function visualize_spider_chart: 
+### Description:
+#This function helps to visualize spider chart in different scale based on some parameters. The function is used to display top products of the store.
+  
+### Arguments:
+#data_table        : data frame or data table object, from where the chart uses the values for visualization.
+
+#num_item          : integer, the number of items that is used to represent the number of spokes.
+
+#spider_segment    : integer, the number of segment in the spider web.
+
+#spider_title      : string, the title to explain briefly about the chart.
+
+# Spider chart
+visualize_spider_chart <- function(data_table, num_item, 
+                                   spider_segment, spider_title) {
+  
+  ############# Data Pre Processing ##################
+  data_table <- data_table[order(-purchase_quantity)]
+  temp_products <- data.table()
+  temp_products$product_name <- pwn.dt[data_table[1:num_item, "product_id"], 
+                                       "product_short_name",    
+                                       on="product_id"]
+  
+  temp_products$purchase_quantity <- data_table[1:num_item]$purchase_quantity
+  
+  df_spider_1 <- as.data.frame(matrix(temp_products$purchase_quantity, 
+                                      ncol=num_item))                                          
+  
+  colnames(df_spider_1) <- temp_products$product_name
+  
+  #####################################################################
+  
+  data_table <- data_table[order(-customer_id)]
+  temp_products <- data.table()
+  temp_products$product_name <- pwn.dt[data_table[1:num_item, "product_id"], 
+                                       "product_short_name", 
+                                       on="product_id"]
+  
+  temp_products$customer_id <- data_table[1:num_item]$customer_id
+  
+  df_spider_2 <- as.data.frame(matrix(temp_products$customer_id, 
+                                      ncol=num_item))
+  
+  colnames(df_spider_2) <- temp_products$product_name
+  
+  ###################################################################
+  
+  data_table <- data_table[order(-price)]
+  temp_products <- data.table()
+  temp_products$product_name <- pwn.dt[data_table[1:num_item, "product_id"], 
+                                       "product_short_name", 
+                                       on="product_id"]
+  
+  temp_products$price <- data_table[1:num_item]$price
+  
+  df_spider_3 <- as.data.frame(matrix(round(temp_products$price, 2), 
+                                      ncol=num_item))
+  
+  colnames(df_spider_3) <-temp_products$product_name
+  
+  #####################################################
+  # To use the fmsb package, 2 lines to the dataframe: 
+  # the max and min of each topic to show on the plot!
+  scale_min <- min(df_spider_1) - 40   
+  scale_max <- max(df_spider_1) + 40
+  scale_interval <- (scale_max - scale_min) / spider_segment
+  
+  min_vector <- rep(scale_min, num_item)
+  max_vector <- rep(scale_max, num_item)
+  
+  #####################################################
+  
+  df_spider_1 <- rbind(max_vector, min_vector, df_spider_1)
+  
+  # Split the screen in 3 parts
+  par(mar=c(1, 0.8, 0.8, 0.8), mfrow=c(2, 2))
+  radarchart( df_spider_1, axistype=1,  
+              
+              #custom polygon
+              pcol=rgb(0.2,0.5,0.5,0.9), pfcol=rgb(0.2,0.5,0.5,0.5), plwd=4, 
+              
+              seg=spider_segment,
+              
+              #custom the grid
+              cglcol="grey", cglty=1, axislabcol="navy", 
+              caxislabels=seq(scale_min, scale_max, scale_interval), cglwd=0.8,
+              
+              #custom labels
+              vlcex=1,
+              
+              #title
+              title=spider_title[1]
+  )
+ 
+  ################################################################
+
+  ###############################################################
+  
+  scale_min <- min(df_spider_2) - 40   
+  scale_max <- max(df_spider_2) + 40
+  scale_interval <- (scale_max - scale_min) / spider_segment
+  
+  min_vector <- rep(scale_min, num_item)
+  max_vector <- rep(scale_max, num_item)
+  
+  ################################################################
+  
+  df_spider_2 <- rbind(max_vector, min_vector, df_spider_2)
+  
+  radarchart( df_spider_2, axistype=1,  
+              
+              #custom polygon
+              pcol=rgb(0.2,0.5,0.5,0.9), pfcol=rgb(0.2,0.5,0.5,0.5), plwd=4, 
+              
+              seg=spider_segment,
+              
+              #custom the grid
+              cglcol="grey", cglty=1, axislabcol="navy", 
+              caxislabels=seq(scale_min, scale_max, scale_interval), cglwd=0.8,
+              
+              #custom labels
+              vlcex=1,
+              
+              #title
+              title=spider_title[2]
+  )
+  
+  ########################################################
+  
+  ###############################################################
+  
+  scale_min <- min(df_spider_3) - 40   
+  scale_max <- max(df_spider_3) + 40
+  scale_interval <- (scale_max - scale_min) / spider_segment
+  
+  min_vector <- rep(scale_min, num_item)
+  max_vector <- rep(scale_max, num_item)
+  
+  ################################################################
+  
+  df_spider_3 <- rbind(max_vector, min_vector, df_spider_3)
+  
+  radarchart( df_spider_3, axistype=1,  
+              
+              #custom polygon
+              pcol=rgb(0.2,0.5,0.5,0.9), pfcol=rgb(0.2,0.5,0.5,0.5), plwd=4, 
+              
+              seg=spider_segment,
+              
+              #custom the grid
+              cglcol="grey", cglty=1, axislabcol="navy", 
+              caxislabels=seq(scale_min, scale_max, scale_interval), cglwd=0.8,
+              
+              #custom labels
+              vlcex=1,
+              
+              #title
+              title=spider_title[3]
+  )
+  
+  par(mfrow=c(1,1))
+}
+```
+
+```{r bra_05, tidy = 'formatR', echo=FALSE}
+# PCA chart (Scree Plot and Cumulative Sum Plot)
+## Function visualize_pca:
+### Description:
+#This function helps to visualize the scree plot and the cumulative proportion variable explained to select the number of principle components. 
+
+### Arguments:
+#title       : string, the title to explain briefly about the chart. 
+
+#pca_obj     : principle component object that is returned by the "prcomp" function.
+
+visualize_pca <- function(title, caption, pca_obj) {
+  num_pc <- length(pca_obj$sdev)
+  pca_df <- data.frame(PC=1:num_pc,
+                       var_explained=(pca_obj$sdev)^2/sum((pca_obj$sdev)^2))
+  pca_df$cumsum_var_explained <- cumsum(pca_df$var_explained)
+  
+  scree_plot <- ggplot(pca_df) + 
+                labs(title = title,
+                      caption = caption[1]) + 
+                aes(x = PC, y = var_explained, group=1) +
+                geom_point(size = 4) +
+                ylab("Prop. Variance Explained") + 
+                geom_line() + 
+                theme(
+                  plot.caption = element_text(hjust = 0.5, size = 12, face = "bold")
+                )
+  
+  cumsum_plot <- ggplot(pca_df) + 
+                  labs(caption = caption[2]) +
+                  aes(x = PC, y = cumsum_var_explained, group=1) +
+                  geom_point(size = 4) +
+                  ylab("Cumulative Prop. Variance Explained") + 
+                  geom_line() + 
+                  theme(
+                    plot.caption = element_text(hjust = 0.5, size = 12, face = "bold")
+                  )
+  
+  scree_plot + cumsum_plot
+}
+```
+
+
+```{r bra_06, tidy='formatR', echo=FALSE}
+## Function visualize_influencial_features_on_pca:
+### Description:
+#This function helps to see which explanatory variables have greater influence on the main principle components. These main principle components are chosen from the previous the scree plot and the cumulative proportion variable explained chart. Also another purpose is to see the cluster formation among the explanatory variables to measures which explanatory variables are close and correlated to each others.
+
+### Arguments:
+#title       : string, the title to explain briefly about the chart.
+
+#pca_obj     : principle component object that is returned by the "prcomp" function.
+
+#num_pc      : integer, the number of the main principle components.
+
+# features that contribute to the classification
+# explanatory variables that are influencial and correlated to each other
+visualize_influencial_features_on_pca <- function(title, caption, pca_obj, num_pc) {
+  df_pca_loadings <- data.frame(pca_obj$rotation)
+  df_pca_loadings$features <- row.names(df_pca_loadings)
+  
+  ggplot(df_pca_loadings) +
+    labs(title = title,
+         caption = caption) +
+    aes(x = PC1, y = PC2,
+        label = features, color = features ) + 
+    geom_point() + 
+    geom_text(size=3) + 
+    theme(
+      plot.caption = element_text(hjust = 0.5, size = 12, face = "bold")
+    )
+}
+```
+
+
+```{r bra_07, tidy='formatR', echo=FALSE}
+## Function visualize_pca_analysis:
+### Description:
+#This function helps to see the principle components on whole data set by group wise, so that it can easily visualize the dependency of different groups on the main principle components.
+
+### Arguments:
+#title       : string, the title to explain briefly about the chart. 
+
+#pca_obj     : principle component object that is returned by the "prcomp" function.
+
+visualize_pca_analysis <- function(title, caption, pca_obj) {
+  df_pca_analysis <- data.frame(pca_obj$x)
+  df_pca_analysis$group <- sapply( strsplit(as.character(row.names(df_for_pca)), "_"), "[[", 1 )
+  # plot PC1 and PC2 values by category
+  ggplot(df_pca_analysis) +
+    labs(title = title,
+         caption = caption) +
+    aes(x = PC1, y = PC2, color = group) +
+    geom_point() + 
+    theme(
+      plot.caption = element_text(hjust = 0.5, size = 12, face = "bold")
+    )
+}
+```
+
+
+```{r bra_08, tidy = 'formatR', echo=FALSE}
+################ Data Pre Processing ########################################
+# Overall Store
+all_products <- cop.dt[, list(customer_id=.N, 
+                              purchase_quantity=sum(purchase_quantity), 
+                              price=sum(price),
+                              freight_value=sum(freight_value),
+                              product_photos_qty=first(product_photos_qty),
+                              product_weight_g=first(product_weight_g),
+                              product_length_cm=first(product_length_cm),
+                              product_height_cm=first(product_height_cm),
+                              product_width_cm=first(product_width_cm)),
+                       by=c('product_id', 'product_category_name_english')]
+
+##############################################################################
+```
+
+### Principle Component Analysis:
+
+The most important use of PCA is to represent a multivariate data table as smaller set of variables (summary indices) in order to observe trends, jumps, clusters and outliers. This overview may uncover the relationships between observations and variables, and among the variables. 
+
+[Source Ref: https://www.sartorius.com/en/knowledge/science-snippets/what-is-principal-component-analysis-pca-and-how-it-is-used-507186]
+
+In this research question, principle component analysis is used find out which variables have greater influence on calculating top product and also see the relationships among those variables and observe the data pattern.
+
+```{r bra_09, tidy = 'formatR', echo=FALSE}
+# Principle Component Analysis
+################ Data Pre Processing #########################################
+df_for_pca <- data.frame(all_products)
+row.names(df_for_pca) <- paste(all_products$product_category_name_english, 
+                               row.names(df_for_pca), sep = "_")
+df_for_pca$product_id <- NULL
+df_for_pca$product_category_name_english <- NULL
+
+pca_result <- prcomp(df_for_pca, scale.=TRUE)
+summary(pca_result)
+```
+From the principle component summary, it is seen that, the principle component 1 has 38.71% variance and the principle component 2 has 25.92% variance.   
+
+```{r bra_10, echo=FALSE, fig.width=12, fig.height=8, fig.cap="Priciple Components Selection", fig.align = 'center'}
+# Principle Component Analysis
+################# Visualization ###################################################################
+visualize_pca(title = 'PCA for Top Products', 
+              caption = c("Figure 1.1: Scree Plot",
+                          "Figure 1.2: Cumulative Sum Plot"), 
+              pca_obj = pca_result)
+#####################################################################################
+```
+
+From the above scree plot, it is seen that there is an elbow formation on PC4 and also in the cumulative proportion variance explained plot, the first principle component that is over 80% is the PC4. So from the above two charts, We decide to take principle component 1 to 4 as the main principle component for further data analysis. 
+
+```{r bra_11, echo=FALSE, fig.width=12, fig.height=8, fig.cap="Features that influence Principle Components", fig.align = 'center'}
+# Principle Component Analysis
+################# Visualization ###################################################################
+visualize_influencial_features_on_pca(title = "Influencial Features on PCA", 
+                                      caption = "Figure 2.1: Score Plot PC1 vs PC2",
+                                      pca_obj = pca_result, num_pc = 4)
+#####################################################################################
+```
+
+From the above chart, it is seen that there are two clusters. One cluster is top-left corner which includes product width, height, length and weight variables and another cluster includes purchase quantity, price, customer size and freight value. So it can be easily visualize that product dimensions and weights are highly correlated to each others and also same goes for the purchase quantity, price, customer size and freight value. Between this two cluster, the purchase quantity, price, customer size and freight value have much more impact and influence on the main principle components. As a result, We choose the second cluster(the purchase quantity, price, customer size and freight value) for further data analysis.    
+
+```{r bra_12, echo=FALSE, fig.width=12, fig.height=8, fig.cap="Categories wise Principle Component's values", fig.align = 'center'}
+# Principle Component Analysis
+################# Visualization ###################################################################
+visualize_pca_analysis(title = "PC Analysis",
+                       caption = "Figure 3.1: Plot PC1 vs PC2 data points by Category",
+                       pca_obj = pca_result)
+#####################################################################################
+```
+
+From the above group(Product Category) wise PCA analysis(PC1 vs PC2), it is seen that most of the product categories are close to each other and has positive dependencies on both PC1 and PC2. 
+
+## Top Products on Olist:
+
+From the PCA, We choose three explanatory variable or features to visualize the top products. They are: 
+
+1. Sales (purchase quantity)
+2. Size (customer size)
+3. Product Revenue (price)
+
+The following charts show top products on overall store:
+
+```{r bra_13, echo=FALSE, fig.width=12, fig.height=8, fig.cap="Top Products on Olist by Sales, Size and Revenue", fig.align = 'center'}
+################# Visualization ######################################
+# Overall Store
+visualize_spider_chart(data_table = all_products, 
+                       num_item = 14, 
+                       spider_segment = 4, 
+                       spider_title = c("Sales (Scale: Sold Quantity)", 
+                                        "Size (Scale: Number of Customers)", 
+                                        "Revenue (Scale: Brazillian Real)"))
+```
+
+In the above spider charts are used to visualize the top products by sales, size and revenues. It is also seen a similar data pattern for the sales, size and revenues which means they are correlated and positively proportional to each others. In this sense, the score plot from PCA is cross validated with the spider plots.
+
+```{r bra_14, echo=FALSE, tidy = 'formatR'}
+################ Data Pre Processing ####################################
+# Category wise
+sales_and_revenues_by_category <- cop.dt[, list(purchase_quantity=sum(purchase_quantity), 
+                                                price=sum(price)), 
+                                         by='product_category_name_english']
+
+sales_and_revenues_by_category <- sales_and_revenues_by_category[order(-purchase_quantity)]
+
+factor_category <- as.factor(sales_and_revenues_by_category$product_category_name_english)
+numeric_category_1 <- as.numeric(sales_and_revenues_by_category[1,
+                                                           "product_category_name_english"])
+numeric_category_2 <- as.numeric(sales_and_revenues_by_category[2, 
+                                                           "product_category_name_english"])
+
+top_category_1 <- levels(factor_category)[numeric_category_1]
+top_category_2 <- levels(factor_category)[numeric_category_2]
+
+setnames(sales_and_revenues_by_category, "product_category_name_english", "group_name")
+
+products_by_category <- cop.dt[, list(customer_id=.N, purchase_quantity=sum(purchase_quantity), 
+                                      price=sum(price), freight_value=sum(freight_value)), 
+                               by=c('product_id', 'product_category_name_english')]
+```
+
+The following two waffle charts explain sales and revenues based on top 6 categories. The top 6 categories are given in the chart legend. 
+
+```{r bra_15, echo=FALSE, fig.width=12, fig.height=8, fig.cap = "Waffle charts to visualize Sales and Revenue by Category", fig.align = 'center'}
+################# Visualization ######################################
+# Category wise
+visualize_waffle_chart(data_table = sales_and_revenues_by_category, 
+                       num_items = 6, 
+                       waffle_title = c("Category wise Sales", "Category wise Revenue"), 
+                       waffle_rows = 4, waffle_size = 0.6)
+```
+
+In the 1st waffle chart, each square represents 1000 sales and in the 2nd waffle chart, each square represents 100,000 brazillian real.
+
+From the above waffle charts, We select the common category named "Health and Beauty" for the further data visualization because in the "Category wise Sales" waffle chart, the "Health and Beauty" category is the second top most category that have higher number of sales. On the other hand, in the "Category wise Revenues" waffle chart, the "Health and Beauty" category is the first top most category which have the highest number of revenues among other categories.
+
+The following data visualization is for the top products based on the category named "Health and Beauty":
+
+```{r bra_16, echo=FALSE, fig.width=12, fig.height=8, fig.cap="Categorized Top Products on Olist by Sales, Size and Revenue", fig.align = 'center'}
+################# Visualization ##################################
+# By Top Most Category
+visualize_spider_chart(data_table = products_by_category[top_category_2, 
+                                                         on="product_category_name_english"], 
+                       num_item = 14, 
+                       spider_segment = 4, 
+                       spider_title = c(paste("Sales (Scale: Sold Quantity)"), 
+                                        paste("Size (Scale: Number of Customers)"), 
+                                        paste("Revenue (Scale: Brazillian Real)")))
+```
+
+In the above spider charts are used to visualize the top products by sales, size and revenues. It is also seen a similar data pattern for the sales, size but little bit different data pattern revenues which means they are almost correlated and positively proportional to each others. In this sense, the score plot from PCA is cross validated with the spider plots.
+
+## Conclusion: 
+From the above waffle charts and spider charts, it is concluded that the e-commerce store is earning most from the following product categories:
+
+* bed_bath_table
+* health_beauty
+* watches_gifts
+* sports_leisure
+* furniture_decor
+* computers_accessories
+* housewares
+
+and also the sellers who are selling products from the above categories are earning most. Specially the following products has the maximum coverage on the overall e-commerce store:
+
+* Bunk Bed
+* Queen Bed Sheet
+* Gasoline Chainsaw
+* Electric Trimmer
+* Samsung 24 inch LED Monitor
+* Pampers Care
+* Agricultural Sprayer 2L
+* Galvanized Wheelbarrow
+* Colgate Toothbrush
+* Lavitan Hair Boxes
+* Casio Vintage Women's Watch
+* Electric Brush
+
+## Learnings and Future Work:
+After answering the research questions, we experienced about data quality issues on the data set. At the same time, we learned how to overcome these issues through data preparation and pre processing.
+
+The important data quality related issues are given below:
+
+* The order item data set does not have any quantity column and instead of this column, same order item is multiplied according to quantity. For example: a order item has 5 quantity then this order item has 5 copies in the order item set.
+* There is no relationship between order item and review data sets. So, the reviews are order specific. In this case, if a order contains two order items which have two different products and a customer scored for one product in the review section, then the review score is applied for both products.   
+
+The future work on this data set will be as follows:
+
+* Display which type of payment methods are mostly preferred by the customers. This can be grouped by  customer state.
+* Visualize the pattern of the product's dimension and weight on shipment cost. This can be grouped by product category, customer state, shipment year and month. 
+* Visualize how product parameters (for example: category, category, photo quantity, size, width, length, height, weight), customer review scores and geolocations play an important role to make a seller as a top seller among other sellers.
+* Display category and geolocation wise customer's buying trend and pattern so that sellers can easily identify about the supply of product in specific category in specific location.
